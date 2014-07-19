@@ -1,0 +1,101 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <iostream>
+#include <sstream>
+#include <fstream>
+#include <iomanip>  
+
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/calib3d/calib3d.hpp>
+#include <opencv2/highgui/highgui.hpp>
+
+
+cv::Mat cameraMatrix; // 内部パラメータ行列
+cv::vector<cv::Mat> rvecs, tvecs; //回転ベクトルと平行移動ベクトル
+
+
+
+void output() //出力用
+{
+	std::ofstream calResult;
+	calResult.open ("Exercise1_parameters.txt");
+	calResult << "intrinsic parameters: [a11][a12]...[a32][a33] \n";
+	calResult << std::fixed;
+
+	// 内部パラメータ記入
+	for (int i = 0; i < cameraMatrix.rows; i++){
+		for (int j = 0; j < cameraMatrix.cols; j++){
+			calResult << std::setprecision(6) << cameraMatrix.at<double>(i, j) << "\t";
+		}
+	}
+
+	//外部パラメータ記入
+	calResult << "\n\n" << "[Image #]: [r11][r12]...[r32][r33][t1][t2][t3] ";
+	for (int i = 0; i < (int)rvecs.size(); i++){
+		cv::Mat rMatrix;
+		Rodrigues(rvecs[i], rMatrix); // 回転ベクトルを回転行列に変換
+		// 回転行列記入
+		calResult  << "\n" <<"[Image " << std::setw(2) << std::setfill('0') << i << "]: "; 
+		for (int j = 0; j  < rMatrix.rows; j++){
+			for (int k = 0; k < rMatrix.cols; k++){
+				calResult << std::setprecision(6) << rMatrix.at<double>(j, k) << "\t";
+			}
+		}
+		// 平行移動ベクトル記入
+		for (int j = 0; j  < tvecs[i].rows; j++){
+			for (int k = 0; k < tvecs[i].cols; k++){
+				calResult << std::setprecision(6) << tvecs[i].at<double>(j, k) << "\t";
+			}
+		}
+	}
+	calResult.close();
+}
+
+int main( int argc, char** argv)
+{
+	// 宣言部
+	const int		NumOfPic = 50; // 枚数
+	cv::vector<cv::Mat>			checkerImgs; // チェッカ画像
+	const cv::Size				patternSize( 10, 7); // チェッカ交点数
+	cv::vector<cv::vector<cv::Point2f>>	imagePoints( NumOfPic); // チェッカ交点座標
+	cv::vector<cv::vector<cv::Point3f>>	worldPoints( NumOfPic); // 世界座標
+	cv::Mat						distCoeffs;		// 歪み係数ベクトル
+
+	// ①画像読込
+	for( int i = 0; i < NumOfPic; i++ ) {
+		std::stringstream		stream;
+		stream << std::setw(5) << std::setfill('0') <<  i + 1 << ".jpg";
+		std::string	fileNo = stream.str();
+		checkerImgs.push_back( cv::imread( fileNo) );
+		std::cout << "load image: " << fileNo << std::endl;
+	}
+
+	// ②格子の交点座標計算
+	for( int i = 0; i < NumOfPic; i++ ) {
+		std::cout << "finding " << i + 1 << "...";
+		if( cv::findChessboardCorners( checkerImgs[i], patternSize, imagePoints[i] ) ) {
+			std::cout << " -> found all corners." << std::endl;
+		} else {
+			std::cout << " -> missed some corners." << std::endl;
+			return -1;
+		}
+	}
+	std::cout << "Please wait..." << std::endl;
+
+	// ③世界座標計算
+	for( int i = 0; i < NumOfPic; i++){
+		for( int j = 0 ; j < patternSize.area(); j++){
+			worldPoints[i].push_back( cv::Point3f(	static_cast<float>( j % patternSize.width * 48), 
+						  static_cast<float>( j / patternSize.width * 48), 0.0 ) );
+		}
+	}
+
+	// ④カメラキャリブレーション
+	cv::calibrateCamera( worldPoints, imagePoints, checkerImgs[0].size(), cameraMatrix, distCoeffs, 
+			     rvecs, tvecs, CV_CALIB_ZERO_TANGENT_DIST | CV_CALIB_FIX_K1 |CV_CALIB_FIX_K2 |CV_CALIB_FIX_K3);
+
+	// ⑤テキスト出力
+	output();
+
+	return 0;
+}
